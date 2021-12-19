@@ -1,0 +1,123 @@
+
+# RNN
+# Stacked LSTM performs better than traditional ARIMA for predicting future stock price 
+# Future Google Stock Price Prediction; variations independent from the past
+# Predict upward and downward trends
+
+
+# Import Libraries
+import numpy as np  
+import matplotlib.pyplot as plt 
+import pandas as pd
+import math
+
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+
+from keras.models import Sequential
+from keras.layers import Dense
+from keras.layers import LSTM
+from keras.layers import Dropout
+
+
+# Part 1 - Data Preprocessing
+
+# Import Training Set
+dataset_train = pd.read_csv('Google_Stock_Price_Train.csv')
+training_set = dataset_train.iloc[:, 1:2].values
+
+#Feature Scaling: apply normalization especially when there is a sigmoid activation function in the output layer of your RNN
+sc = MinMaxScaler(feature_range=(0,1))
+training_set_scaled = sc.fit_transform(training_set)
+
+# Create Data Structure for RNN Memory: 60 Timesteps and 1 output
+# RNN looks at 60 previous timesteps (financial days - 3 months) --> x(t-60) - x(t)
+# Understand trends before predicting output --> y(t + 1)
+X_train = []
+y_train = []
+
+for i in range(60, 1258):
+    X_train.append(training_set_scaled[i-60:i, 0])
+    y_train.append(training_set_scaled[i, 0])
+
+X_train, y_train = np.array(X_train), np.array(y_train)
+
+# Reshaping: adding a dimension for number of indicators we can use to predict the stock price
+# Compatibility with input shape of RNN
+X_train = np.reshape(X_train, (X_train.shape[0], X_train.shape[1], 1))
+
+
+# Part 2 - Building the RNN: Architecture of Stacked LSTM, with Several Layers and Dropout Regularization
+
+# Initialize RNN as a Sequence of Layers opposed to a Computational Graph
+regressor = Sequential()
+
+# Add First LSTM Layer and Dropout Regularization to prevent Overfitting
+regressor.add(LSTM(units=50, return_sequences = True, input_shape=(X_train.shape[1], 1)))
+regressor.add(Dropout(0.2))
+
+# Add Second LSTM Layer and Dropout Regularization
+regressor.add(LSTM(units=50, return_sequences = True))
+regressor.add(Dropout(0.2))
+
+# Add Third LSTM Layer and Dropout Regularization
+regressor.add(LSTM(units=50, return_sequences = True))
+regressor.add(Dropout(0.2))
+
+# Add Fourth LSTM Layer and Dropout Regularization
+regressor.add(LSTM(units = 50))
+regressor.add(Dropout(0.2))
+
+# Add Output Layer
+regressor.add(Dense(units=1))
+
+# Compiling the RNN: RMSprop is recommended for RNN
+# Adam optimizer is a very safe optimzer and happens to perform better in this case
+regressor.compile(optimizer = 'adam', loss = 'mean_squared_error')
+
+# Fit RNN to Training Set
+regressor.fit(X_train, y_train, epochs=100, batch_size=32)
+
+
+# Part 3 - Making the Predictions and Visualizing the Results
+
+# Getting the Real Google 2017 Stock Price
+dataset_test = pd.read_csv('Google_Stock_Price_Test.csv')
+real_stock_price = dataset_test.iloc[:, 1:2].values
+
+# Getting the Predicted Google 2017 Stock Price
+dataset_total = pd.concat((dataset_train['Open'], dataset_test['Open']), axis = 0)
+inputs = dataset_total[len(dataset_total) - len(dataset_test) - 60:].values
+inputs = inputs.reshape(-1, 1)
+# Scale Inputs
+inputs = sc.transform(inputs)
+#3D structure
+X_test = []
+for i in range(60, 80):
+    X_test.append(inputs[i-60:i, 0])
+X_test = np.array(X_test)
+X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+# Predict
+predicted_stock_price = regressor.predict(X_test)
+# Inverse Scaling on Predictions
+predicted_stock_price = sc.inverse_transform(predicted_stock_price)
+
+# Visualizing the results
+plt.plot(real_stock_price, color='red', label='Real Google Stock Price')
+plt.plot(predicted_stock_price, color='blue', label='Predicted Google Stock Price')
+plt.title('Google Stock Price Prediction')
+plt.xlabel('Time')
+plt.ylabel('Google Stock Price')
+plt.legend()
+plt.show()
+
+# We are more interested in the trends and direction of our predictions, than how close they are to actuals
+# Regressors are typically evaluated by RMSE, and so, for formality
+rmse = math.sqrt(mean_squared_error(real_stock_price, predicted_stock_price))
+
+# Overall, the model was a success, but nonetheless, options to improve the model include:
+# Use 10 years data instead of 5 years
+# Increase timesteps to 100-120
+# Including additional indicators, maybe stock prices of another company are directly correlated
+# Adding more LSTM layers
+# Implement additional neurons in each layer to respond better to the complexity of the problem
